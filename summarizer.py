@@ -7,6 +7,7 @@ or use a paid Vertex AI key for stronger privacy guarantees on real company data
 import json
 import os
 import requests
+import time
 
 SYSTEM_PROMPT = """You are a COUNT/REACH Review Analyst. Your job is EXTRACTION, not summarization.
 
@@ -183,32 +184,48 @@ def summarize_report(raw_text, api_key=None, **kwargs):
 
     prompt_text = "Here is the extracted report/slide content:\n\n" + raw_text + "\n\nProduce the JSON now."
 
-    res = requests.post(
-        url,
-        headers={"Content-Type": "application/json"},
-        json={
-            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
-            "generationConfig": {
-                "temperature": 0.3,
-                "maxOutputTokens": 1200,
-                "responseMimeType": "application/json",
-            },
+    payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1200,
+            "responseMimeType": "application/json",
         },
-        timeout=90,
+    }
+
+    last_error = None
+    for attempt in range(3):
+        res = requests.post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=90,
+        )
+        data = res.json()
+
+        # Gemini overloaded (503) - wait briefly and retry rather than failing immediately
+        if "error" in data and data["error"].get("code") == 503:
+            last_error = data
+            time.sleep(3 * (attempt + 1))  # 3s, then 6s
+            continue
+
+        try:
+            text_block = data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raise RuntimeError("Gemini returned no usable text: " + json.dumps(data)[:500])
+
+        cleaned = text_block.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```")[1]
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+
+        return _parse_json_response(cleaned)
+
+    raise RuntimeError(
+        "Gemini is currently overloaded and didn't respond after 3 attempts. "
+        "This is temporary on Google's end - please try again in a minute. "
+        "Details: " + json.dumps(last_error)[:300]
     )
-    data = res.json()
-
-    try:
-        text_block = data["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        raise RuntimeError("Gemini returned no usable text: " + json.dumps(data)[:500])
-
-    cleaned = text_block.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```")[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-    cleaned = cleaned.strip()
-
-    return _parse_json_response(cleaned)
