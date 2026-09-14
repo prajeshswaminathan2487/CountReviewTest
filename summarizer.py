@@ -195,7 +195,7 @@ def summarize_report(raw_text, api_key=None, **kwargs):
                 "response_mime_type": "application/json",
             },
         },
-        timeout=45,
+        timeout=90,
     )
     data = res.json()
 
