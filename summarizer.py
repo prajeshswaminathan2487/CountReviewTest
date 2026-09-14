@@ -192,7 +192,7 @@ def summarize_report(raw_text, api_key=None, **kwargs):
             "generationConfig": {
                 "temperature": 0.3,
                 "maxOutputTokens": 1200,
-                "response_mime_type": "application/json",
+                "responseMimeType": "application/json",
             },
         },
         timeout=90,
